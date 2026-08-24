@@ -1,4 +1,8 @@
+import { homedir } from "node:os"
+import { mkdir, writeFile } from "node:fs/promises"
+
 const APP = "opencode"
+const USE_APP_ICON = true
 const SUPPRESS_WHEN_TERMINAL_FOCUSED = true
 const TERMINAL_CLASSES = [
   "kitty",
@@ -17,6 +21,15 @@ const TERMINAL_CLASSES = [
   "caelestia-term",
 ]
 
+const ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+<rect width="512" height="512" fill="#131010"/>
+<path d="M320 224V352H192V224H320Z" fill="#5A5858"/>
+<path fill-rule="evenodd" d="M384 416H128V96H384V416ZM320 160H192V352H320V160Z" fill="#FFFFFF"/>
+</svg>`
+
+const ICON_THEME_DIR = `${homedir()}/.local/share/icons/hicolor/scalable/apps`
+const ICON_CACHE_DIR = `${homedir()}/.cache/opencode-caelestia-notify`
+
 const debugLog = async ($, line) => {
   const file = process.env.OPENCODE_NOTIFY_DEBUG
   if (!file) return
@@ -34,10 +47,32 @@ const focusedTerminal = async ($) => {
   }
 }
 
+const installIcon = async ($) => {
+  if (!USE_APP_ICON) return null
+  try {
+    await mkdir(ICON_THEME_DIR, { recursive: true })
+    await writeFile(`${ICON_THEME_DIR}/${APP}.svg`, ICON_SVG)
+    await $`gtk-update-icon-cache -f -t ${homedir()}/.local/share/icons/hicolor`.quiet().catch(() => {})
+    await mkdir(ICON_CACHE_DIR, { recursive: true })
+    await writeFile(`${ICON_CACHE_DIR}/${APP}.svg`, ICON_SVG)
+    return APP
+  } catch {
+    try {
+      await mkdir(ICON_CACHE_DIR, { recursive: true })
+      await writeFile(`${ICON_CACHE_DIR}/${APP}.svg`, ICON_SVG)
+      return `${ICON_CACHE_DIR}/${APP}.svg`
+    } catch {
+      return null
+    }
+  }
+}
+
 export const NotifyPlugin = async ({ client, $, directory }) => {
   const seenPermissions = new Set()
   const recent = new Map()
   const DEDUPE_WINDOW_MS = 3000
+  const appIcon = await installIcon($)
+  if (!appIcon) await debugLog($, `${new Date().toISOString()} icon install failed, using symbolic fallback`)
 
   const isDuplicate = (key) => {
     if (!key) return false
@@ -62,10 +97,11 @@ export const NotifyPlugin = async ({ client, $, directory }) => {
       await debugLog($, `${new Date().toISOString()} suppressed (duplicate) ${title} | ${body}`)
       return
     }
-    await $`notify-send -u ${urgency} -i ${icon} -a ${APP} -h string:x-canonical-private-synchronous:${APP} ${title} ${body}`
-      .quiet()
-      .catch(() => {})
-    await debugLog($, `${new Date().toISOString()} [${urgency}] ${title} | ${body}`)
+    const args = ["-u", urgency, "-a", APP]
+    args.push("-i", appIcon || icon)
+    args.push("-h", `string:x-canonical-private-synchronous:${APP}`, title, body)
+    await $`notify-send ${args}`.quiet().catch(() => {})
+    await debugLog($, `${new Date().toISOString()} [${urgency}] icon=${appIcon || icon} ${title} | ${body}`)
   }
 
   return {
@@ -82,7 +118,7 @@ export const NotifyPlugin = async ({ client, $, directory }) => {
           const title = (await sessionTitle(sessionID)) || directory.split("/").pop() || "Task"
           await notify({
             key: `idle:${sessionID}`,
-            title: `${APP} — ready`,
+            title: `${APP}: ready`,
             body: title,
             icon: "dialog-information-symbolic",
           })
@@ -99,7 +135,7 @@ export const NotifyPlugin = async ({ client, $, directory }) => {
           const title = (await sessionTitle(sessionID)) || directory.split("/").pop() || "Task"
           await notify({
             key: `error:${sessionID}`,
-            title: `${APP} — error`,
+            title: `${APP}: error`,
             body: `${title}\n${detail}`,
             urgency: "critical",
             icon: "dialog-error-symbolic",
@@ -116,7 +152,8 @@ export const NotifyPlugin = async ({ client, $, directory }) => {
           const what = props.title || props.type || "Permission needed"
           const title = (await sessionTitle(sessionID)) || directory.split("/").pop() || "Task"
           await notify({
-            title: `${APP} — waiting for you`,
+            key: `perm:${key}`,
+            title: `${APP}: waiting for you`,
             body: `${what}\n${title}`,
             urgency: "critical",
             icon: "dialog-password-symbolic",
@@ -129,7 +166,7 @@ export const NotifyPlugin = async ({ client, $, directory }) => {
           const title = (await sessionTitle(sessionID)) || directory.split("/").pop() || "Task"
           await notify({
             key: `question:${sessionID}`,
-            title: `${APP} — question for you`,
+            title: `${APP}: question for you`,
             body: `${String(q).slice(0, 200)}\n${title}`,
             urgency: "critical",
             icon: "dialog-question-symbolic",
