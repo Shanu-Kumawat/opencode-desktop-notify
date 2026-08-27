@@ -4,6 +4,8 @@ Desktop notifications for [opencode](https://opencode.ai). Built for [Caelestia 
 
 Get a popup the moment opencode finishes a task, hits an error, needs a permission approval, or asks you a question. No more staring at the terminal.
 
+![Demo](demo.gif)
+
 ## Features
 
 | Event                                     | Notification                                   |
